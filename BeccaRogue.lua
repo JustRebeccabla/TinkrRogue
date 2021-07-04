@@ -18,12 +18,18 @@ print("\124cffff80ff\124Tinterface\\ChatFrame\\UI-ChatIcon-Blizz:12:20:0:0:32:16
 
 Routine:RegisterRoutine(function()
   local GetComboPoints = GetComboPoints("player","target")
+  local mainHandLink = GetInventoryItemLink("player", GetInventorySlotInfo("MainHandSlot"))
+  local _, _, _, _, _, _, itemType5 = GetItemInfo(mainHandLink)
   if gcd() > latency() then return end
-  if mounted() or UnitIsDeadOrGhost("player") then return end
-  local function Project(X, Y, Z, Direction, Distance)
-    return X + math.cos(Direction) * Distance, Y + math.sin(Direction) * Distance, Z
+  if mounted() or UnitIsDeadOrGhost("player") or debuff(Gouge,"target") then return end
+  local function InventorySlots()
+    local slotsfree = 0
+    for i = 0, 4 do
+      freeslots, _ = GetContainerNumFreeSlots(i)
+      slotsfree = slotsfree + freeslots
+    end
+    return slotsfree
   end
-  
   local function GetFinisherMaxDamage(ID)
     local function GetStringSpace(x, y)
       for i = 1, 7 do
@@ -78,7 +84,6 @@ Routine:RegisterRoutine(function()
     local evisc2calculated = ap * (2 * 0.03) + e2 * multiplier
     local evisc3calculated = ap * (3 * 0.03) + e3 * multiplier
     local evisc4calculated = ap * (4 * 0.03) + e4 * multiplier
-    local evisc5calculated = ap * (5 * 0.03) + e5 * multiplier
     if not UnitIsPlayer("target") and castable(Eviscerate) then
       if UnitHealth("target") <= evisc1calculated and GetComboPoints == 1 then
         cast(Eviscerate)
@@ -92,9 +97,6 @@ Routine:RegisterRoutine(function()
       if UnitHealth("target") <= evisc4calculated and GetComboPoints == 4 then
         cast(Eviscerate)
       end
-      if UnitHealth("target") <= evisc5calculated and GetComboPoints == 5 then
-        cast(Eviscerate)
-      end
     end
   end
   local function Defensives()
@@ -105,13 +107,57 @@ Routine:RegisterRoutine(function()
       if castable(Vanish) and health() <= 15 and GetItemCount(5140) > 0 and ttd("target") > 4 then
         cast(Vanish)
       end
+      if castable(Gouge) and health() <= 20 and ttd("target") > 10 then
+        cast(Gouge)
+      end
     end
   end
   local function Cooldowns()
   end
-  local function AoE()
-  end
   local function Opener()
+    if buff(Stealth,"player") and IsBehind() then
+      if itemType5 == "Daggers" and castable(Ambush) then
+        cast(Ambush,"target")
+      end
+      if itemType5 ~= "Daggers" and castable(CheapShot) then
+        cast(CheapShot,"target")
+      end
+    end
+  end
+  local function Dps()
+    if castable(SliceAndDice,"target") and GetComboPoints >= 2 and not buff(SliceAndDice, 'player') then
+      cast(SliceAndDice,"target")
+    end
+    --Test
+    if castable(ExposeArmor, 'target') and combo() == 5 and
+    (not debuff(ExposeArmor, 'target') or debuffduration(ExposeArmor, 'target') < 2) then
+      return cast(ExposeArmor, 'target')
+    end
+    if castable(SliceAndDice, 'target') and combo() >= 2 and buffduration(SliceAndDice, 'player') < 2 then
+      return cast(SliceAndDice, 'target')
+    end
+    if castable(Eviscerate, 'target') and combo() >= 3 and buffduration(Rapture, 'player') > 4 and
+    not debuff(Eviscerate, 'target') then
+      return cast(Eviscerate, 'target')
+    end
+    if castable(Rapture, 'target') and combo() >= 2 and between(2, buffduration(Rapture, 'player'), 4) then
+      return cast(Rapture, 'target')
+    end
+    
+    
+  end
+  local function Loot()
+    for i, object in ipairs(Objects()) do
+      if ObjectLootable(object) and ObjectDistance("player",object) < 5 then
+        ObjectInteract(object)
+      end
+    end
+    for i = GetNumLootItems(), 1, -1 do
+      LootSlot(i)
+    end
+  end
+  local function Project(X, Y, Z, Direction, Distance)
+    return X + math.cos(Direction) * Distance, Y + math.sin(Direction) * Distance, Z
   end
   local function Distract()
     --*Throw Distract behind the enemy if its facing us to let us open with a behind opener
@@ -119,15 +165,14 @@ Routine:RegisterRoutine(function()
       local X, Y, Z = ObjectPosition("target")
       local SelfFacing = ObjectRotation("player")
       local ProjX, ProjY, ProjZ = Project(X, Y, Z, SelfFacing, 7)
-      if ProjX and IsSpellKnown(1725) and castable(Distract) then
-        cast(Distract,'none'):click(ProjX,ProjY,ProjZ)
+      if ProjX and IsSpellKnown(1725) and (not IsInRaid() or not IsInInstance()) then
+        cast("Distract",'none'):click(ProjX,ProjY,ProjZ)
       end
     end
   end
   local function Filler()
-    local mainHandLink = GetInventoryItemLink("player", GetInventorySlotInfo("MainHandSlot"))
-    local _, _, _, _, _, _, itemType5 = GetItemInfo(mainHandLink)
-    if (not debuff(Sap,"target") or not debuff(Gouge,"target") or not debuff(Blind,"target") or not buff("Vanish","player")) and GetComboPoints < 5 and melee() then
+    
+    if (not debuff(Sap,"target") and not debuff(Gouge,"target") and not debuff(Blind,"target") and not buff(Vanish,"player") and not buff(Stealth,"player")) and GetComboPoints < 5 and melee() then
       --Backstab/SS if Hemorrhage is not learned on Daggers
       if itemType5 == "Daggers" and not IsSpellKnown(26864) then
         if IsBehind() and castable(Backstab) then
@@ -156,12 +201,21 @@ Routine:RegisterRoutine(function()
       cast(Stealth)
     end
   end
+  
+  
   if UnitExists("target") and not UnitIsDeadOrGhost("target") then
     if Defensives() then return true end
     if Execute() then return true end
+    if Opener() then return true end
+    if Dps() then return true end
+
     if Filler() then return true end 
     if Hide() then return true end
     if Distract() then return true end
   end
+  if not UnitAffectingCombat("player") and not buff(Stealth,"player") and InventorySlots() > 2 then
+    Loot()
+    return true 
+  end
+  
 end, Routine.Classes.Rogue, 'BeccaRogue')
-
